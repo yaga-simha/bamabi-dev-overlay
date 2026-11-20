@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  validate-overlay:
+    name: Validate Overlay & Consistency Tools
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bamabi-dev-overlay
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify dual license files exist
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+
+      - name: Byte-compile Python modules
+        run: python3 -m py_compile sync_check.py overlay.py tests/test_overlay.py
+
+      - name: Validate cargo-overlay.toml (4 repos, 15 crates)
+        run: |
+          python3 -c '
+          import tomllib
+          with open("cargo-overlay.toml", "rb") as f:
+              data = tomllib.load(f)
+          patch = data["patch"]
+          assert len(patch) == 4, f"expected 4 patch tables, got {len(patch)}"
+          total = sum(len(crates) for crates in patch.values())
+          assert total == 15, f"expected 15 patched crates, got {total}"
+          assert "cargo-bam" in patch["https://github.com/yaga-simha/bamabi-tools.git"]
+          '
+
+      - name: Run unit test suite
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Spellcheck with typos
+        uses: crate-ci/typos@v1.31.1

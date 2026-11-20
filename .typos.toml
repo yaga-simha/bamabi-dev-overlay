@@ -1,0 +1,31 @@
+# `typos` spellchecker configuration for `bamabi-dev-overlay`
+
+[files]
+extend-exclude = [
+    "__pycache__/",
+    "*.pyc",
+    ".agents/",
+    "target/",
+]
+
+[default]
+extend-ignore-re = [
+    "0x[0-9a-fA-F_]+",
+]
+
+[default.extend-identifiers]
+nd = "nd"
+ro = "ro"
+ot = "ot"
+ba = "ba"
+pn = "pn"
+
+[default.extend-words]
+lod = "lod"
+soa = "soa"
+ratatui = "ratatui"
+winit = "winit"
+avian = "avian"
+valgrind = "valgrind"
+callgrind = "callgrind"
+gungraun = "gungraun"

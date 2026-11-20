@@ -1,0 +1,26 @@
+# MANAGED BY bamabi-dev-overlay/overlay.py — DO NOT EDIT MANUALLY
+# Local multi-repo sibling `[patch]` overlay for `<federation-root>/.cargo/config.toml`.
+# Paths are relative to the directory containing `.cargo/` (i.e., the federation root).
+
+[patch."https://github.com/yaga-simha/bamabi-wire.git"]
+bamabi_sys = { path = "bamabi-wire/crates/bamabi_sys" }
+bamabi_macros = { path = "bamabi-wire/crates/bamabi_macros" }
+bamabi_sdk_gen = { path = "bamabi-wire/crates/bamabi_sdk_gen" }
+bamabi_guest_sys = { path = "bamabi-wire/crates/bamabi_guest_sys" }
+bamabi_guest = { path = "bamabi-wire/crates/bamabi_guest" }
+
+[patch."https://github.com/yaga-simha/bamabi-tools.git"]
+bamabi_trust = { path = "bamabi-tools/crates/bamabi_trust" }
+bamabi_manifest = { path = "bamabi-tools/crates/bamabi_manifest" }
+cargo-bam = { path = "bamabi-tools/crates/cargo-bam" }
+
+[patch."https://github.com/yaga-simha/bamabi-core.git"]
+bamabi_host_sys = { path = "bamabi-core/crates/bamabi_host_sys" }
+bamabi_host = { path = "bamabi-core/crates/bamabi_host" }
+bamabi_watcher = { path = "bamabi-core/crates/bamabi_watcher" }
+
+[patch."https://github.com/yaga-simha/bamabi.git"]
+bamabi_bridges = { path = "bamabi/crates/bamabi_bridges" }
+bamabi_render = { path = "bamabi/crates/bamabi_render" }
+bamabi_reflect = { path = "bamabi/crates/bamabi_reflect" }
+bamabi = { path = "bamabi/crates/bamabi" }
