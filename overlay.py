@@ -18,8 +18,12 @@ LAYER_REPOS: tuple[str, ...] = (
     "bamabi-tools",
     "bamabi-core",
     "bamabi",
+    "bamabi-strata",
     "bamabi-showcase",
 )
+REPO_DIRS: dict[str, str] = {
+    "bamabi-strata": "strata",
+}
 
 CRATE_REPO: dict[str, str] = {
     "bamabi_sys": "bamabi-wire",
@@ -40,6 +44,18 @@ CRATE_REPO: dict[str, str] = {
 }
 
 SKIP_DIRS = {".git", "target", ".zig-cache", "zig-out", "__pycache__"}
+
+
+def resolve_repo_dir(root: Path, repo: str) -> Path:
+    canonical = root / repo
+    if canonical.is_dir():
+        return canonical
+    alt = REPO_DIRS.get(repo)
+    if alt is not None:
+        alt_dir = root / alt
+        if alt_dir.is_dir():
+            return alt_dir
+    return canonical
 
 
 def load_overlay_patch_tables(
@@ -163,7 +179,7 @@ def inspect_cargolock_hygiene(root: Path) -> tuple[list[str], list[str]]:
     dirty_issues: list[str] = []
 
     for repo in LAYER_REPOS:
-        repo_dir = root / repo
+        repo_dir = resolve_repo_dir(root, repo)
         for lock_path in discover_lockfiles(repo_dir):
             try:
                 with lock_path.open("rb") as f:

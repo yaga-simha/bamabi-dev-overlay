@@ -233,6 +233,106 @@ license.workspace = true
     write_file(overlay_dir / "LICENSE-APACHE", "Apache License 2.0\n")
 
 
+def add_strata_fixture(
+    root: Path,
+    *,
+    dir_name: str = "strata",
+    strict_git: bool = True,
+    deny_mode: str = "allow_org",
+) -> Path:
+    repo_dir = root / dir_name
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    write_file(repo_dir / "LICENSE-MIT", "MIT License\n")
+    write_file(repo_dir / "LICENSE-APACHE", "Apache License 2.0\n")
+    write_file(
+        repo_dir / "abi-lock.toml",
+        """[project]
+name = "bamabi-strata"
+layer = 3
+
+[abi]
+bam_abi_version = "0x0003_0000"
+c_symbol_prefix = "bamabi"
+workspace_version = "0.3.0"
+bevy_version = "0.20.1"
+rust_version = "1.95"
+edition = "2024"
+""",
+    )
+
+    if deny_mode == "allow_org" and strict_git:
+        sources_block = """[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = ["yaga-simha"]
+"""
+    elif deny_mode == "allow_git" and strict_git:
+        sources_block = """[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/yaga-simha/bamabi-wire.git",
+    "https://github.com/yaga-simha/bamabi-tools.git",
+    "https://github.com/yaga-simha/bamabi-core.git",
+]
+"""
+    else:
+        sources_block = """[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+"""
+    write_file(repo_dir / "deny.toml", sources_block)
+
+    if strict_git:
+        ws_deps = """bamabi_sys = { version = "0.3.0", git = "https://github.com/yaga-simha/bamabi-wire.git", branch = "main" }
+bamabi_trust = { version = "0.3.0", git = "https://github.com/yaga-simha/bamabi-tools.git", branch = "main" }
+bamabi_host = { version = "0.3.0", git = "https://github.com/yaga-simha/bamabi-core.git", branch = "main" }"""
+    else:
+        ws_deps = """bamabi_sys = { version = "0.3.0", path = "../bamabi-wire/crates/bamabi_sys" }
+bamabi_trust = { version = "0.3.0", path = "../bamabi-tools/crates/bamabi_trust" }
+bamabi_host = { version = "0.3.0", path = "../bamabi-core/crates/bamabi_host" }"""
+
+    write_file(
+        repo_dir / "Cargo.toml",
+        f"""[workspace]
+resolver = "2"
+members = ["crates/strata_syntax"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yaga-simha/bamabi-strata"
+
+[workspace.dependencies]
+{ws_deps}
+""",
+    )
+    write_file(
+        repo_dir / "crates" / "strata_syntax" / "Cargo.toml",
+        """[package]
+name = "strata_syntax"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bamabi_sys = { workspace = true }
+""",
+    )
+    write_file(repo_dir / "crates" / "strata_syntax" / "src" / "lib.rs", "")
+    return repo_dir
+
+
 class OverlayAndSyncCheckTests(unittest.TestCase):
     def test_sync_check_valid_pre_m6_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -696,6 +796,121 @@ license = "MIT OR Apache-2.0"
                 encoding="utf-8",
             )
             self.assertEqual(sync_check.main(["--root", str(root), "--strict-git"]), 1)
+
+    def test_sync_check_five_repo_backwards_compat_and_require_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_valid_fixture(root, strict_git=True)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = sync_check.main(["--root", str(root), "--strict-git"])
+            self.assertEqual(rc, 0)
+            self.assertIn("all 5 layer repos", buf.getvalue())
+
+            # Requiring optional bamabi-strata fails when absent
+            self.assertEqual(
+                sync_check.main(["--root", str(root), "--strict-git", "--with-strata"]),
+                1,
+            )
+            self.assertEqual(
+                sync_check.main(["--root", str(root), "--strict-git", "--require-all"]),
+                1,
+            )
+
+    def test_sync_check_with_strata_dir_and_canonical_dir(self) -> None:
+        for dir_name in ("strata", "bamabi-strata"):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                create_valid_fixture(root, strict_git=True, deny_mode="allow_git")
+                add_strata_fixture(root, dir_name=dir_name, strict_git=True, deny_mode="allow_git")
+
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = sync_check.main(["--root", str(root), "--strict-git"])
+                self.assertEqual(rc, 0, msg=buf.getvalue())
+                self.assertIn("all 6 layer repos", buf.getvalue())
+
+                self.assertEqual(
+                    sync_check.main(["--root", str(root), "--strict-git", "--with-strata"]),
+                    0,
+                )
+                self.assertEqual(
+                    sync_check.main(["--root", str(root), "--strict-git", "--require-all"]),
+                    0,
+                )
+
+    def test_sync_check_strata_layer_3_peer_guard(self) -> None:
+        # 1) bamabi-strata (L3) depending on bamabi (L3) is rejected
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_valid_fixture(root, strict_git=True)
+            strata_dir = add_strata_fixture(root, dir_name="strata", strict_git=True)
+            ws_manifest = strata_dir / "Cargo.toml"
+            ws_manifest.write_text(
+                ws_manifest.read_text(encoding="utf-8")
+                + 'bamabi = { version = "0.3.0", git = "https://github.com/yaga-simha/bamabi.git", branch = "main" }\n',
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = sync_check.main(["--root", str(root), "--strict-git"])
+            self.assertEqual(rc, 1)
+            self.assertIn("layer violation", buf.getvalue())
+            self.assertIn("bamabi-strata (L3) depends on bamabi in bamabi (L3)", buf.getvalue())
+
+        # 2) bamabi (L3) depending on strata_syntax in bamabi-strata (L3) is rejected
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_valid_fixture(root, strict_git=True)
+            add_strata_fixture(root, dir_name="strata", strict_git=True)
+            bamabi_manifest = root / "bamabi" / "Cargo.toml"
+            bamabi_manifest.write_text(
+                bamabi_manifest.read_text(encoding="utf-8")
+                + 'strata_syntax = { version = "0.3.0", git = "https://github.com/yaga-simha/bamabi-strata.git", branch = "main" }\n',
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = sync_check.main(["--root", str(root), "--strict-git"])
+            self.assertEqual(rc, 1)
+            self.assertIn("layer violation", buf.getvalue())
+            self.assertIn("bamabi (L3) depends on strata_syntax in bamabi-strata (L3)", buf.getvalue())
+
+    def test_overlay_cargolock_hygiene_includes_strata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_valid_fixture(root, strict_git=True)
+            strata_dir = add_strata_fixture(root, dir_name="strata", strict_git=True)
+            strata_lock = strata_dir / "Cargo.lock"
+
+            # Non-standalone path-resolved bamabi_sys in strata/Cargo.lock
+            write_file(
+                strata_lock,
+                """version = 4
+
+[[package]]
+name = "bamabi_sys"
+version = "0.3.0"
+""",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = overlay.main(["status", "--root", str(root), "--strict"])
+            self.assertEqual(rc, 1)
+            self.assertIn("strata/Cargo.lock", buf.getvalue())
+
+            # Clean standalone git-resolved strata/Cargo.lock
+            write_file(
+                strata_lock,
+                """version = 4
+
+[[package]]
+name = "bamabi_sys"
+version = "0.3.0"
+source = "git+https://github.com/yaga-simha/bamabi-wire.git?branch=main#abc"
+""",
+            )
+            self.assertEqual(overlay.main(["status", "--root", str(root), "--strict"]), 0)
 
 
 if __name__ == "__main__":

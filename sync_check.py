@@ -15,9 +15,14 @@ LAYERS: tuple[tuple[str, int], ...] = (
     ("bamabi-tools", 1),
     ("bamabi-core", 2),
     ("bamabi", 3),
+    ("bamabi-strata", 3),
     ("bamabi-showcase", 4),
 )
 LAYER_BY_NAME: dict[str, int] = dict(LAYERS)
+REPO_DIRS: dict[str, str] = {
+    "bamabi-strata": "strata",
+}
+OPTIONAL_REPOS: frozenset[str] = frozenset({"bamabi-strata"})
 OVERLAY_REPO = "bamabi-dev-overlay"
 ALL_REPOS: tuple[str, ...] = tuple(name for name, _ in LAYERS) + (OVERLAY_REPO,)
 
@@ -46,11 +51,20 @@ CRATE_REPO: dict[str, str] = {
     "bamabi_render": "bamabi",
     "bamabi_reflect": "bamabi",
     "bamabi": "bamabi",
+    "strata_syntax": "bamabi-strata",
+    "bamabi_native_rt": "bamabi-strata",
+    "strata_sema": "bamabi-strata",
+    "strata_mir": "bamabi-strata",
+    "strata_codegen": "bamabi-strata",
+    "strata_jit": "bamabi-strata",
+    "strata_lsp": "bamabi-strata",
+    "stratac": "bamabi-strata",
+    "strata_docs": "bamabi-strata",
 }
 
 CANONICAL_GIT_URLS: dict[str, str] = {
     repo: f"https://github.com/yaga-simha/{repo}.git"
-    for repo in ("bamabi-wire", "bamabi-tools", "bamabi-core", "bamabi")
+    for repo in ("bamabi-wire", "bamabi-tools", "bamabi-core", "bamabi", "bamabi-strata")
 }
 
 EXPECTED_LICENSE = "MIT OR Apache-2.0"
@@ -72,6 +86,34 @@ class Reporter:
 
     def error(self, msg: str) -> None:
         self.errors.append(msg)
+
+
+def resolve_repo_dir(root: Path, repo: str) -> Path:
+    canonical = root / repo
+    if canonical.is_dir():
+        return canonical
+    alt = REPO_DIRS.get(repo)
+    if alt is not None:
+        alt_dir = root / alt
+        if alt_dir.is_dir():
+            return alt_dir
+    return canonical
+
+
+def select_layers(
+    root: Path, *, with_strata: bool = False, require_all: bool = False
+) -> tuple[tuple[str, int], ...]:
+    selected: list[tuple[str, int]] = []
+    for repo, layer in LAYERS:
+        if (
+            repo in OPTIONAL_REPOS
+            and not require_all
+            and not (with_strata and repo == "bamabi-strata")
+            and not resolve_repo_dir(root, repo).is_dir()
+        ):
+            continue
+        selected.append((repo, layer))
+    return tuple(selected)
 
 
 def find_files(repo_dir: Path, predicate) -> list[Path]:
@@ -97,13 +139,17 @@ def load_toml(path: Path, reporter: Reporter) -> dict | None:
     return None
 
 
-def check_abi_locks(root: Path, reporter: Reporter) -> dict[str, str] | None:
+def check_abi_locks(
+    root: Path,
+    reporter: Reporter,
+    layers: tuple[tuple[str, int], ...] = LAYERS,
+) -> dict[str, str] | None:
     baseline: dict[str, str] | None = None
     baseline_repo: str | None = None
     all_valid = True
 
-    for repo, expected_layer in LAYERS:
-        lock_path = root / repo / "abi-lock.toml"
+    for repo, expected_layer in layers:
+        lock_path = resolve_repo_dir(root, repo) / "abi-lock.toml"
         data = load_toml(lock_path, reporter)
         if data is None:
             all_valid = False
@@ -155,18 +201,25 @@ def check_abi_locks(root: Path, reporter: Reporter) -> dict[str, str] | None:
 
     if all_valid and baseline is not None:
         reporter.ok(
-            "abi-lock.toml parity verified across all 5 layer repos "
+            f"abi-lock.toml parity verified across all {len(layers)} layer repos "
             f"(abi={baseline['bam_abi_version']}, version={baseline['workspace_version']}, "
             f"rust={baseline['rust_version']}, edition={baseline['edition']})"
         )
     return baseline
 
 
-def check_license_files(root: Path, skip_overlay: bool, reporter: Reporter) -> None:
-    repos = [name for name, _ in LAYERS] if skip_overlay else list(ALL_REPOS)
+def check_license_files(
+    root: Path,
+    skip_overlay: bool,
+    reporter: Reporter,
+    layers: tuple[tuple[str, int], ...] = LAYERS,
+) -> None:
+    repos = [name for name, _ in layers]
+    if not skip_overlay:
+        repos.append(OVERLAY_REPO)
     missing_or_empty = False
     for repo in repos:
-        repo_dir = root / repo
+        repo_dir = resolve_repo_dir(root, repo)
         if not repo_dir.is_dir():
             reporter.error(f"Missing repository directory: {repo_dir}")
             missing_or_empty = True
@@ -218,7 +271,7 @@ def check_repo_manifests_and_deps(
     strict_git: bool,
     reporter: Reporter,
 ) -> set[str]:
-    repo_dir = root / repo
+    repo_dir = resolve_repo_dir(root, repo)
     referenced_upstream_repos: set[str] = set()
     if not repo_dir.is_dir():
         return referenced_upstream_repos
@@ -303,7 +356,7 @@ def check_repo_manifests_and_deps(
         else:
             active_ws_pkg = ws_pkg
             active_ws_deps = ws_deps
-            ws_source_label = f"{repo}/Cargo.toml"
+            ws_source_label = f"{repo_dir.name}/Cargo.toml"
 
         pkg = manifest.get("package")
         if isinstance(pkg, dict):
@@ -376,7 +429,7 @@ def check_repo_manifests_and_deps(
                 if isinstance(dep_spec, dict) and "path" in dep_spec:
                     dep_path = dep_spec["path"]
                     resolved = (manifest_path.parent / dep_path).resolve()
-                    expected_prefix = (root / owner_repo).resolve()
+                    expected_prefix = resolve_repo_dir(root, owner_repo).resolve()
                     try:
                         resolved.relative_to(expected_prefix)
                     except ValueError:
@@ -431,8 +484,9 @@ def check_deny_toml(
     referenced_upstream_repos: set[str],
     strict_git: bool,
     reporter: Reporter,
+    layers: tuple[tuple[str, int], ...] = LAYERS,
 ) -> None:
-    deny_path = root / repo / "deny.toml"
+    deny_path = resolve_repo_dir(root, repo) / "deny.toml"
     deny_data = load_toml(deny_path, reporter)
     if deny_data is None:
         return
@@ -459,7 +513,7 @@ def check_deny_toml(
 
     has_org = isinstance(github_orgs, list) and "yaga-simha" in github_orgs
     needed_repos = referenced_upstream_repos or {
-        name for name, lyr in LAYERS if lyr < layer
+        name for name, lyr in layers if lyr < layer
     }
     missing_urls = [
         CANONICAL_GIT_URLS[r]
@@ -478,10 +532,14 @@ def check_deny_toml(
             reporter.warn("PRE-M6 DENY.TOML: " + msg)
 
 
-def check_stale_refs(root: Path, reporter: Reporter) -> None:
+def check_stale_refs(
+    root: Path,
+    reporter: Reporter,
+    layers: tuple[tuple[str, int], ...] = LAYERS,
+) -> None:
     found_stale = False
-    for repo, _ in LAYERS:
-        repo_dir = root / repo
+    for repo, _ in layers:
+        repo_dir = resolve_repo_dir(root, repo)
         if not repo_dir.is_dir():
             continue
 
@@ -510,16 +568,24 @@ def check_stale_refs(root: Path, reporter: Reporter) -> None:
         reporter.ok("No stale `bevy_mod_abi` / `bevy_abi_mod*` references in manifests, CI, Makefiles, or build.zig")
 
 
-def run_checks(root: Path, strict_git: bool, skip_overlay: bool) -> Reporter:
+def run_checks(
+    root: Path,
+    strict_git: bool,
+    skip_overlay: bool,
+    *,
+    with_strata: bool = False,
+    require_all: bool = False,
+) -> Reporter:
     reporter = Reporter()
-    abi = check_abi_locks(root, reporter)
-    check_license_files(root, skip_overlay, reporter)
+    layers = select_layers(root, with_strata=with_strata, require_all=require_all)
+    abi = check_abi_locks(root, reporter, layers)
+    check_license_files(root, skip_overlay, reporter, layers)
 
-    for repo, layer in LAYERS:
+    for repo, layer in layers:
         refs = check_repo_manifests_and_deps(root, repo, layer, abi, strict_git, reporter)
-        check_deny_toml(root, repo, layer, refs, strict_git, reporter)
+        check_deny_toml(root, repo, layer, refs, strict_git, reporter, layers)
 
-    check_stale_refs(root, reporter)
+    check_stale_refs(root, reporter, layers)
     return reporter
 
 
@@ -544,6 +610,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not require bamabi-dev-overlay LICENSE-* files under --root.",
     )
+    parser.add_argument(
+        "--with-strata",
+        action="store_true",
+        help="Require optional bamabi-strata (strata/ or bamabi-strata/) repository to be present under --root.",
+    )
+    parser.add_argument(
+        "--require-all",
+        action="store_true",
+        help="Require all layer repositories (including optional ones like bamabi-strata) under --root.",
+    )
     return parser.parse_args(argv)
 
 
@@ -553,7 +629,13 @@ def main(argv: list[str] | None = None) -> int:
     mode = "strict-git" if args.strict_git else "pre-m6-default"
     print(f"bamabi sync_check.py (root={root}, mode={mode})")
 
-    reporter = run_checks(root, strict_git=args.strict_git, skip_overlay=args.skip_overlay_repo)
+    reporter = run_checks(
+        root,
+        strict_git=args.strict_git,
+        skip_overlay=args.skip_overlay_repo,
+        with_strata=args.with_strata,
+        require_all=args.require_all,
+    )
 
     for item in reporter.oks:
         print(f"  [OK]    {item}")
