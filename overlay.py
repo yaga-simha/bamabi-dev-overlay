@@ -26,6 +26,7 @@ REPO_DIRS: dict[str, str] = {
 }
 
 CRATE_REPO: dict[str, str] = {
+    "bamabi_schema": "bamabi-wire",
     "bamabi_sys": "bamabi-wire",
     "bamabi_macros": "bamabi-wire",
     "bamabi_sdk_gen": "bamabi-wire",
@@ -33,6 +34,7 @@ CRATE_REPO: dict[str, str] = {
     "bamabi_guest": "bamabi-wire",
     "bamabi_trust": "bamabi-tools",
     "bamabi_manifest": "bamabi-tools",
+    "bamabi_build": "bamabi-tools",
     "cargo-bam": "bamabi-tools",
     "bamabi_host_sys": "bamabi-core",
     "bamabi_host": "bamabi-core",

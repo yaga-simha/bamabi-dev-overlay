@@ -3,6 +3,7 @@
 # Paths are relative to the directory containing `.cargo/` (i.e., the federation root).
 
 [patch."https://github.com/yaga-simha/bamabi-wire.git"]
+bamabi_schema = { path = "bamabi-wire/crates/bamabi_schema" }
 bamabi_sys = { path = "bamabi-wire/crates/bamabi_sys" }
 bamabi_macros = { path = "bamabi-wire/crates/bamabi_macros" }
 bamabi_sdk_gen = { path = "bamabi-wire/crates/bamabi_sdk_gen" }
@@ -12,6 +13,7 @@ bamabi_guest = { path = "bamabi-wire/crates/bamabi_guest" }
 [patch."https://github.com/yaga-simha/bamabi-tools.git"]
 bamabi_trust = { path = "bamabi-tools/crates/bamabi_trust" }
 bamabi_manifest = { path = "bamabi-tools/crates/bamabi_manifest" }
+bamabi_build = { path = "bamabi-tools/crates/bamabi_build" }
 cargo-bam = { path = "bamabi-tools/crates/cargo-bam" }
 
 [patch."https://github.com/yaga-simha/bamabi-core.git"]
